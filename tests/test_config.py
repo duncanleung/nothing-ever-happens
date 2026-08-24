@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from bot.config import load_nothing_happens_config
+from bot.config import KalshiConfig, load_nothing_happens_config
 
 
 def _write_config(tmp_path, payload) -> str:
@@ -138,4 +138,52 @@ def test_load_nothing_happens_config_requires_funder_for_proxy_wallets(
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("PRIVATE_KEY", "0xabc")
     with pytest.raises(ValueError, match="FUNDER_ADDRESS"):
+        load_nothing_happens_config()
+
+
+def test_load_nothing_happens_config_selects_kalshi_exchange(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert isinstance(exchange, KalshiConfig)
+    assert exchange.api_key_id == "key-123"
+    assert exchange.environment == "demo"
+    assert exchange.base_url == "https://external-api.demo.kalshi.co/trade-api/v2"
+
+
+def test_load_nothing_happens_config_kalshi_requires_api_key_id(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.delenv("KALSHI_API_KEY_ID", raising=False)
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+
+    with pytest.raises(ValueError, match="KALSHI_API_KEY_ID"):
+        load_nothing_happens_config()
+
+
+def test_load_nothing_happens_config_kalshi_production_base_url(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+    monkeypatch.setenv("KALSHI_ENVIRONMENT", "production")
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert exchange.base_url == "https://external-api.kalshi.com/trade-api/v2"
+
+
+def test_load_nothing_happens_config_rejects_unsupported_exchange(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "coinbase"
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+
+    with pytest.raises(ValueError, match="Unsupported exchange"):
         load_nothing_happens_config()

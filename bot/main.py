@@ -10,7 +10,7 @@ import time
 import aiohttp
 from dotenv import load_dotenv
 
-from bot.config import load_nothing_happens_config
+from bot.config import KalshiConfig, load_nothing_happens_config
 from bot.exchange.paper import PaperExchangeClient
 from bot.live_recovery import LiveRecoveryCoordinator
 from bot.logging_config import configure_logging
@@ -44,6 +44,10 @@ def _validate_live_runtime(exchange_cfg, database_url: str | None) -> None:
 
 
 def _build_exchange(exchange_cfg):
+    if isinstance(exchange_cfg, KalshiConfig):
+        from bot.exchange.kalshi import KalshiExchangeClient
+
+        return KalshiExchangeClient(exchange_cfg, allow_trading=exchange_cfg.live_send_enabled)
     if exchange_cfg.live_send_enabled:
         from bot.exchange.polymarket_clob import PolymarketClobExchangeClient
 
@@ -52,6 +56,8 @@ def _build_exchange(exchange_cfg):
 
 
 def _resolve_live_wallet_address(exchange_cfg) -> str | None:
+    if isinstance(exchange_cfg, KalshiConfig):
+        return None  # Kalshi has no on-chain wallet.
     if not exchange_cfg.live_send_enabled:
         return None
     if exchange_cfg.signature_type in {1, 2}:
@@ -97,13 +103,21 @@ async def run():
 
         init_db(database_url)
 
+    exchange_log_fields = (
+        {"exchange": "kalshi", "environment": exchange_cfg.environment}
+        if isinstance(exchange_cfg, KalshiConfig)
+        else {
+            "exchange": "polymarket",
+            "host": exchange_cfg.host,
+            "chain_id": exchange_cfg.chain_id,
+            "signature_type": exchange_cfg.signature_type,
+        }
+    )
     logger.info(
         "bot_starting",
         extra={
             "runtime": "nothing_happens",
-            "host": exchange_cfg.host,
-            "chain_id": exchange_cfg.chain_id,
-            "signature_type": exchange_cfg.signature_type,
+            **exchange_log_fields,
             "live_send_enabled": exchange_cfg.live_send_enabled,
             "cash_pct_per_trade": strategy_cfg.cash_pct_per_trade,
             "min_trade_amount": strategy_cfg.min_trade_amount,
@@ -136,7 +150,8 @@ async def run():
     redeemer = None
     rpc_url = (os.getenv("POLYGON_RPC_URL") or "").strip()
     if (
-        exchange_cfg.live_send_enabled
+        not isinstance(exchange_cfg, KalshiConfig)  # Kalshi settles automatically, no on-chain redemption.
+        and exchange_cfg.live_send_enabled
         and exchange_cfg.private_key
         and exchange_cfg.signature_type == 2
         and exchange_cfg.funder_address

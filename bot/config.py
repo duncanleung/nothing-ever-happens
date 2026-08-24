@@ -116,6 +116,45 @@ def _build_exchange_config(conn: dict[str, Any]) -> ExchangeConfig:
     return exchange
 
 
+KALSHI_DEMO_BASE_URL = "https://external-api.demo.kalshi.co/trade-api/v2"
+KALSHI_PROD_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
+
+
+@dataclass(frozen=True)
+class KalshiConfig:
+    api_key_id: str
+    private_key_path: str
+    environment: str = "demo"
+    live_send_enabled: bool = False
+
+    @property
+    def base_url(self) -> str:
+        if self.environment == "production":
+            return KALSHI_PROD_BASE_URL
+        return KALSHI_DEMO_BASE_URL
+
+    def validate(self) -> None:
+        if not self.api_key_id:
+            raise ValueError("KALSHI_API_KEY_ID is required when exchange is 'kalshi'")
+        if not self.private_key_path:
+            raise ValueError("KALSHI_PRIVATE_KEY_PATH is required when exchange is 'kalshi'")
+        if self.environment not in {"demo", "production"}:
+            raise ValueError(
+                f"KALSHI_ENVIRONMENT must be 'demo' or 'production', got {self.environment!r}"
+            )
+
+
+def _build_kalshi_config() -> KalshiConfig:
+    kalshi = KalshiConfig(
+        api_key_id=_env_optional("KALSHI_API_KEY_ID") or "",
+        private_key_path=_env_optional("KALSHI_PRIVATE_KEY_PATH") or "",
+        environment=(os.getenv("KALSHI_ENVIRONMENT") or "demo").strip().lower(),
+        live_send_enabled=_compute_live_send_enabled(),
+    )
+    kalshi.validate()
+    return kalshi
+
+
 @dataclass(frozen=True)
 class NothingHappensConfig:
     market_refresh_interval_sec: int = 600
@@ -136,19 +175,26 @@ class NothingHappensConfig:
     redeemer_interval_sec: int = 1800
 
 
-def load_nothing_happens_config() -> tuple[ExchangeConfig, NothingHappensConfig]:
+def load_nothing_happens_config() -> tuple[ExchangeConfig | KalshiConfig, NothingHappensConfig]:
     return _load_nothing_happens_config(_load_config_file())
 
 
 def _load_nothing_happens_config(
     cfg: dict[str, Any],
-) -> tuple[ExchangeConfig, NothingHappensConfig]:
-    conn = cfg.get("connection", {})
-    if not isinstance(conn, dict):
-        raise ValueError("config.json field 'connection' must be an object")
+) -> tuple[ExchangeConfig | KalshiConfig, NothingHappensConfig]:
     strat = _get_nothing_happens_section(cfg)
 
-    exchange = _build_exchange_config(conn)
+    exchange_name = str(cfg.get("exchange", "polymarket") or "polymarket").strip().lower()
+    if exchange_name == "kalshi":
+        exchange: ExchangeConfig | KalshiConfig = _build_kalshi_config()
+    elif exchange_name == "polymarket":
+        conn = cfg.get("connection", {})
+        if not isinstance(conn, dict):
+            raise ValueError("config.json field 'connection' must be an object")
+        exchange = _build_exchange_config(conn)
+    else:
+        raise ValueError(f"Unsupported exchange {exchange_name!r}. Must be 'polymarket' or 'kalshi'.")
+
     strategy = NothingHappensConfig(
         market_refresh_interval_sec=_env_int(
             "PM_NH_MARKET_REFRESH_INTERVAL_SEC",
