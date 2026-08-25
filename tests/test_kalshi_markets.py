@@ -5,17 +5,22 @@ from bot.kalshi_markets import (
     KalshiMarket,
     build_kalshi_market,
     fetch_kalshi_markets,
+    fetch_kalshi_markets_via_series_walk,
     qualifies,
 )
 
 
-def test_build_kalshi_market_parses_dollar_fields():
+def test_build_kalshi_market_derives_no_price_from_yes_bid():
     raw = {
         "ticker": "KXFOO-25-BAR",
         "event_ticker": "KXFOO-25",
         "title": "Will something happen?",
-        "yes_ask_dollars": "0.93",
-        "no_ask_dollars": "0.08",
+        "yes_bid_dollars": "0.92",
+        "yes_ask_dollars": "0.95",
+        # A stale/unset no_ask_dollars — Kalshi's book is Yes-only, so this
+        # field sits at 1.0000 whenever nobody has posted a real No ask. It
+        # must NOT be read directly.
+        "no_ask_dollars": "1.0000",
         "volume_24h": "1200",
         "open_interest": "500",
         "close_time": "2026-09-01T00:00:00Z",
@@ -24,8 +29,8 @@ def test_build_kalshi_market_parses_dollar_fields():
     market = build_kalshi_market(raw, series_ticker="KXFOO", category="politics")
 
     assert market.ticker == "KXFOO-25-BAR"
-    assert market.yes_price == pytest.approx(0.93)
-    assert market.no_price == pytest.approx(0.08)
+    assert market.yes_price == pytest.approx(0.95)
+    assert market.no_price == pytest.approx(0.08)  # 1 - yes_bid_dollars
     assert market.volume == pytest.approx(1200)
     assert market.open_interest == pytest.approx(500)
     assert market.yes_token_id == "KXFOO-25-BAR:yes"
@@ -34,6 +39,19 @@ def test_build_kalshi_market_parses_dollar_fields():
 
 def test_build_kalshi_market_returns_none_without_ticker():
     assert build_kalshi_market({}, series_ticker="KXFOO", category="politics") is None
+
+
+def test_build_kalshi_market_skips_mve_parlay_tickers():
+    raw = {
+        "ticker": "KXMVECROSSCATEGORY-25-ABC",
+        "event_ticker": "KXMVECROSSCATEGORY-25",
+        "title": "Combo parlay",
+        "yes_bid_dollars": "0.00",
+        "yes_ask_dollars": "0.00",
+        "no_ask_dollars": "1.0000",
+    }
+
+    assert build_kalshi_market(raw, series_ticker="KXMVECROSSCATEGORY", category="politics") is None
 
 
 def test_qualifies_filters_on_price_and_volume():
@@ -75,7 +93,71 @@ class _FakeResponse:
         return self._payload
 
 
-def test_fetch_kalshi_markets_filters_categories_and_price(monkeypatch):
+def test_fetch_kalshi_markets_paginates_markets_endpoint_directly(monkeypatch):
+    responses = {
+        "/markets": {
+            "markets": [
+                {
+                    "ticker": "KXPOL-A",
+                    "event_ticker": "KXPOL-EVT",
+                    "title": "Q1",
+                    "yes_bid_dollars": "0.92",
+                    "yes_ask_dollars": "0.95",
+                    "volume_24h": "200",
+                },
+                {
+                    "ticker": "KXPOL-B",
+                    "event_ticker": "KXPOL-EVT",
+                    "title": "Q2",
+                    "yes_bid_dollars": "0.50",
+                    "yes_ask_dollars": "0.50",
+                    "volume_24h": "200",
+                },
+                # MVE parlay market — zero liquidity, no_ask stuck at 1.0.
+                {
+                    "ticker": "KXMVECROSSCATEGORY-C",
+                    "event_ticker": "KXMVECROSSCATEGORY-EVT",
+                    "title": "Combo",
+                    "yes_bid_dollars": "0.00",
+                    "yes_ask_dollars": "0.00",
+                    "volume_24h": "0",
+                },
+            ],
+            "cursor": "",
+        },
+    }
+    seen_urls = []
+
+    def fake_get(url, params=None, timeout=None):
+        seen_urls.append((url, params))
+        for path, payload in responses.items():
+            if url.endswith(path):
+                return _FakeResponse(payload)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
+
+    markets = fetch_kalshi_markets("https://example.test", max_no_price=0.10, min_volume=0.0)
+
+    assert [m.ticker for m in markets] == ["KXPOL-A"]
+    assert markets[0].no_price == pytest.approx(0.08)
+    # Only /markets was hit — no /series or /events fan-out.
+    assert all(url.endswith("/markets") for url, _ in seen_urls)
+    assert any(params.get("status") == "open" for _, params in seen_urls)
+
+
+def test_fetch_kalshi_markets_returns_empty_on_fetch_error(monkeypatch):
+    def fake_get(url, params=None, timeout=None):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
+
+    markets = fetch_kalshi_markets("https://example.test")
+
+    assert markets == []
+
+
+def test_fetch_kalshi_markets_via_series_walk_filters_categories_and_price(monkeypatch):
     responses = {
         "/series": {"series": [
             {"ticker": "KXPOL", "category": "Politics"},
@@ -85,9 +167,9 @@ def test_fetch_kalshi_markets_filters_categories_and_price(monkeypatch):
         "/events": {"events": [
             {"markets": [
                 {"ticker": "KXPOL-A", "event_ticker": "KXPOL-EVT", "title": "Q1",
-                 "yes_ask_dollars": "0.95", "no_ask_dollars": "0.05", "volume_24h": "200"},
+                 "yes_bid_dollars": "0.92", "yes_ask_dollars": "0.95", "volume_24h": "200"},
                 {"ticker": "KXPOL-B", "event_ticker": "KXPOL-EVT", "title": "Q2",
-                 "yes_ask_dollars": "0.50", "no_ask_dollars": "0.50", "volume_24h": "200"},
+                 "yes_bid_dollars": "0.50", "yes_ask_dollars": "0.50", "volume_24h": "200"},
             ]}
         ], "cursor": ""},
     }
@@ -100,13 +182,13 @@ def test_fetch_kalshi_markets_filters_categories_and_price(monkeypatch):
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets("https://example.test", max_no_price=0.10, min_volume=0.0)
+    markets = fetch_kalshi_markets_via_series_walk("https://example.test", max_no_price=0.10, min_volume=0.0)
 
     assert [m.ticker for m in markets] == ["KXPOL-A"]
     assert markets[0].category == "politics"
 
 
-def test_fetch_kalshi_markets_skips_series_on_fetch_error(monkeypatch):
+def test_fetch_kalshi_markets_via_series_walk_skips_series_on_fetch_error(monkeypatch):
     def fake_get(url, params=None, timeout=None):
         if url.endswith("/series"):
             return _FakeResponse({"series": [{"ticker": "KXPOL", "category": "Politics"}], "cursor": ""})
@@ -114,6 +196,6 @@ def test_fetch_kalshi_markets_skips_series_on_fetch_error(monkeypatch):
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets("https://example.test")
+    markets = fetch_kalshi_markets_via_series_walk("https://example.test")
 
     assert markets == []

@@ -44,13 +44,18 @@ def test_get_mid_price_for_yes_and_no_sides():
         "market": {
             "yes_bid_dollars": "0.90",
             "yes_ask_dollars": "0.94",
-            "no_bid_dollars": "0.06",
-            "no_ask_dollars": "0.10",
+            # Stale/unset No-side fields — Kalshi's book is Yes-only, so
+            # these sit at 0.0000/1.0000 whenever nobody has posted a real
+            # No-side order. get_mid_price must derive from the Yes side
+            # instead of reading these directly.
+            "no_bid_dollars": "0.00",
+            "no_ask_dollars": "1.00",
         }
     }
     client, _ = _make_client({("GET", "/markets/KXFOO"): market_payload})
 
     assert client.get_mid_price("KXFOO:yes") == pytest.approx(0.92)
+    # no_bid = 1 - yes_ask = 0.06, no_ask = 1 - yes_bid = 0.10 -> mid 0.08
     assert client.get_mid_price("KXFOO:no") == pytest.approx(0.08)
 
 

@@ -257,13 +257,17 @@ class KalshiExchangeClient:
 
     @staticmethod
     def _bid_ask_for_side(market: dict[str, Any], side: str) -> tuple[float, float]:
+        # Kalshi's order book is Yes-only — no_bid_dollars/no_ask_dollars on
+        # the /markets/{ticker} snapshot are not real resting prices (they
+        # sit at 0.0000/1.0000 whenever no one has posted an actual No-side
+        # order, which is nearly always). Derive them from the Yes side
+        # instead: buying No == selling Yes, so no_bid = 1 - yes_ask and
+        # no_ask = 1 - yes_bid.
+        yes_bid = _dollar_field(market, "yes_bid_dollars", "yes_bid")
+        yes_ask = _dollar_field(market, "yes_ask_dollars", "yes_ask")
         if side == "yes":
-            bid = _dollar_field(market, "yes_bid_dollars", "yes_bid")
-            ask = _dollar_field(market, "yes_ask_dollars", "yes_ask")
-        else:
-            bid = _dollar_field(market, "no_bid_dollars", "no_bid")
-            ask = _dollar_field(market, "no_ask_dollars", "no_ask")
-        return bid, ask
+            return yes_bid, yes_ask
+        return 1.0 - yes_ask, 1.0 - yes_bid
 
     def _place_order(
         self,
