@@ -340,6 +340,52 @@ async def test_sync_positions_preserves_existing_holdings_on_fetch_failure() -> 
 
 
 @pytest.mark.asyncio
+async def test_sync_positions_uses_exchange_get_open_positions_when_available() -> None:
+    # MF6: KalshiExchangeClient.get_open_positions() must be used instead of
+    # the Polymarket-only _fetch_open_positions/data-api path — see
+    # .ai/status/qua319-review.md.
+    class KalshiLikeExchange(StubExchange):
+        def __init__(self, positions):
+            super().__init__()
+            self._positions = positions
+            self.get_open_positions_calls = 0
+
+        def get_open_positions(self):
+            self.get_open_positions_calls += 1
+            return self._positions
+
+    positions_payload = [
+        {
+            "slug": "KXFOO:no",
+            "title": "KXFOO",
+            "outcome": "no",
+            "asset": "KXFOO:no",
+            "conditionId": "KXFOO",
+            "size": 10.0,
+            "avgPrice": 0.08,
+            "initialValue": 0.8,
+            "curPrice": 0.08,
+            "currentValue": 0.8,
+            "cashPnl": 0.0,
+            "percentPnl": 0.0,
+            "endDate": "",
+        }
+    ]
+    exchange = KalshiLikeExchange(positions_payload)
+    runtime = _make_runtime(wallet_address="kalshi", exchange=exchange)
+
+    with patch(
+        "bot.strategy.nothing_happens._fetch_open_positions",
+        new=AsyncMock(side_effect=AssertionError("must not call the Polymarket data-api path")),
+    ):
+        await runtime._sync_positions()
+
+    assert exchange.get_open_positions_calls == 1
+    assert "KXFOO:no" in runtime._positions_by_slug
+    assert runtime._remote_positions_ready is True
+
+
+@pytest.mark.asyncio
 async def test_run_price_cycle_waits_for_initial_remote_position_sync() -> None:
     runtime = _make_runtime(wallet_address="0xwallet")
     market = _make_market(slug="wait-for-sync")

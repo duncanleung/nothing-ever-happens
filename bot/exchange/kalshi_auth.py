@@ -27,6 +27,32 @@ class KalshiAuthError(RuntimeError):
     pass
 
 
+class KalshiApiError(RuntimeError):
+    """A non-2xx response from the Kalshi API, with the parsed error body attached."""
+
+    def __init__(self, method: str, path: str, status_code: int, body: str) -> None:
+        self.method = method
+        self.path = path
+        self.status_code = status_code
+        self.body = body
+        super().__init__(f"Kalshi API error {status_code} on {method} {path}: {body}")
+
+
+def _extract_error_body(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return (response.text or "")[:500]
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = error.get("code", "")
+            message = error.get("message", "")
+            return f"{code}: {message}".strip(": ")
+        return str(payload)[:500]
+    return str(payload)[:500]
+
+
 def load_private_key(private_key_path: str) -> RSAPrivateKey:
     path = Path(private_key_path)
     if not path.exists():
@@ -84,7 +110,10 @@ class KalshiAuthSession:
 
     def request_json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self._request(method, path, **kwargs)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise KalshiApiError(method, path, response.status_code, _extract_error_body(response)) from exc
         if not response.content:
             return {}
         return response.json()

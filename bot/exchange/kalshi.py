@@ -41,12 +41,18 @@ from bot.models import (
     Side,
     Trade,
 )
+from bot.order_status import normalize_order_status
 
 logger = logging.getLogger(__name__)
 
 TICK_SIZE = 0.01
 MIN_ORDER_SIZE = 0.01
 SELF_TRADE_PREVENTION_TYPE = "taker_at_cross"
+
+# Mirrors nothing_happens.SUCCESS_ORDER_STATUSES (bot/strategy/nothing_happens.py)
+# post-normalize_order_status(). Kept local rather than imported to avoid the
+# exchange layer depending on the strategy layer.
+_SUCCESS_STATUSES = {"matched", "filled", "simulated"}
 
 
 class KalshiTokenIdError(ValueError):
@@ -226,12 +232,14 @@ class KalshiExchangeClient:
         return float(payload.get("balance", 0)) / 100.0
 
     def get_conditional_balance(self, token_id: str) -> float:
+        # Deliberately does not catch/return 0.0 on failure — a swallowed
+        # exception here reads as "confirmed no position" to fill recovery
+        # (bot/live_recovery.py:_process_ambiguous_row), which can trigger a
+        # duplicate order for a position that actually exists (see MF3 in
+        # .ai/status/qua319-review.md). Propagate and let the caller's own
+        # try/except decide (it already treats failure as "retry later").
         ticker, side = _parse_token_id(token_id)
-        try:
-            payload = self._session.request_json("GET", "/portfolio/positions", params={"ticker": ticker})
-        except Exception as exc:
-            logger.warning("get_conditional_balance failed", extra={"token_id": token_id, "error": str(exc)})
-            return 0.0
+        payload = self._session.request_json("GET", "/portfolio/positions", params={"ticker": ticker})
         positions = payload.get("market_positions") or payload.get("positions") or []
         net_yes = 0.0
         for raw in positions:
@@ -247,6 +255,62 @@ class KalshiExchangeClient:
     def prepare_sell(self, token_id: str) -> bool:
         _ = token_id
         return True
+
+    def get_open_positions(self) -> list[dict[str, Any]]:
+        """All open Kalshi positions, normalized to the dict shape
+        bot.strategy.nothing_happens._position_snapshot_from_api expects.
+
+        Used by NothingHappensRuntime._sync_positions in place of the
+        Polymarket-only _fetch_open_positions/data-api path, so existing
+        Kalshi holdings aren't invisible after a restart (see MF6 in
+        .ai/status/qua319-review.md).
+
+        avg_price/current_price come from a live get_mid_price() quote, not
+        the original fill price — Kalshi's position endpoint doesn't expose
+        an entry-price/PnL field we've verified live (see module docstring),
+        so PnL is left at 0.0 rather than guessed. size and exposure
+        (initialValue) are real and safe to use for duplicate-order
+        prevention and risk-controller exposure tracking.
+        """
+        payload = self._session.request_json("GET", "/portfolio/positions")
+        positions = payload.get("market_positions") or payload.get("positions") or []
+        result: list[dict[str, Any]] = []
+        for raw in positions:
+            ticker = str(raw.get("ticker") or "")
+            if not ticker:
+                continue
+            net_yes = float(raw.get("position", raw.get("position_fp", 0)) or 0)
+            if net_yes == 0:
+                continue
+            side = "yes" if net_yes > 0 else "no"
+            size = abs(net_yes)
+            token_id = f"{ticker}:{side}"
+            try:
+                price = self.get_mid_price(token_id)
+            except Exception as exc:
+                logger.warning(
+                    "get_open_positions_price_lookup_failed",
+                    extra={"token_id": token_id, "error": str(exc)},
+                )
+                price = 0.0
+            result.append(
+                {
+                    "slug": token_id,
+                    "title": ticker,
+                    "outcome": side,
+                    "asset": token_id,
+                    "conditionId": ticker,
+                    "size": size,
+                    "avgPrice": price,
+                    "initialValue": size * price,
+                    "curPrice": price,
+                    "currentValue": size * price,
+                    "cashPnl": 0.0,
+                    "percentPnl": 0.0,
+                    "endDate": "",
+                }
+            )
+        return result
 
     # -- Internal helpers --------------------------------------------------
 
@@ -301,25 +365,63 @@ class KalshiExchangeClient:
         order_id = str(raw.get("order_id") or raw.get("id") or "")
         status = str(raw.get("status") or "submitted")
 
+        # The strategy layer (bot/strategy/nothing_happens.py) reads
+        # OrderResult.raw for Polymarket-shaped fill fields (`makingAmount`/
+        # `takingAmount`, `_fill_price`), not Kalshi's. Inject best-effort
+        # equivalents in `order`'s (our) price/side terms, not Kalshi's
+        # Yes-denominated ones, so a real fill is recognized instead of
+        # falling into the "unknown status" quarantine path. Kalshi's exact
+        # fill-quantity field name is unverified (see module docstring) — try
+        # a few plausible ones, then fall back to "fully filled" on a
+        # success status rather than reporting zero shares for a real fill.
+        filled = _dollar_field(raw, "filled_count", "fill_count")
+        if filled <= 0:
+            remaining = raw.get("remaining_count")
+            initial = raw.get("initial_count", raw.get("count"))
+            if remaining is not None and initial is not None:
+                try:
+                    filled = max(0.0, float(initial) - float(remaining))
+                except (TypeError, ValueError):
+                    filled = 0.0
+        if filled <= 0 and normalize_order_status(status) in _SUCCESS_STATUSES:
+            filled = size
+        if filled > 0:
+            response["takingAmount"] = str(filled)
+            response["makingAmount"] = str(round(filled * price, 6))
+            response["_fill_price"] = price
+            response["_market_price"] = price
+
         logger.info(
             "kalshi_post_order_response",
-            extra={"order_id": order_id, "status": status, "ticker": ticker, "side": kalshi_side},
+            extra={"order_id": order_id, "status": status, "ticker": ticker, "side": kalshi_side, "filled": filled},
         )
         return OrderResult(order_id=order_id, status=status, raw=response)
 
     def _parse_open_order(self, raw: dict[str, Any], *, token_id: str, expected_side: str) -> OpenOrder | None:
+        # Kalshi's book is Yes-only: a resting "bid" order IS ambiguous
+        # between "yes+BUY" and "no+SELL" (and "ask" between "yes+SELL" and
+        # "no+BUY") — see the module docstring's forward mapping, which
+        # _place_order implements. Kalshi's own order object carries no
+        # "conceptual side" tag to disambiguate; the caller-supplied
+        # `expected_side` (from the token_id it asked about) is the only
+        # signal available, so every order returned for this ticker is
+        # interpreted through that lens rather than filtered by trying to
+        # infer yes/no from kalshi_side alone (that inference was the bug —
+        # see MF1/MF7 in .ai/status/qua319-review.md).
         kalshi_side = str(raw.get("side") or "").lower()
-        raw_side = "yes" if kalshi_side == "bid" else "no"
-        if raw_side != expected_side:
+        if kalshi_side not in {"bid", "ask"}:
             return None
 
         order_id = str(raw.get("order_id") or raw.get("id") or "")
         if not order_id:
             return None
 
-        raw_price = _dollar_field(raw, "yes_price_dollars" if kalshi_side == "bid" else "no_price_dollars", "price")
+        raw_price = _dollar_field(raw, "yes_price_dollars", "price")
         our_price = raw_price if expected_side == "yes" else (1.0 - raw_price if raw_price else 0.0)
-        our_side_enum = Side.BUY if kalshi_side == "bid" else Side.SELL
+        if expected_side == "yes":
+            our_side_enum = Side.BUY if kalshi_side == "bid" else Side.SELL
+        else:
+            our_side_enum = Side.SELL if kalshi_side == "bid" else Side.BUY
 
         remaining = raw.get("remaining_count")
         initial = raw.get("initial_count", raw.get("count"))
@@ -341,26 +443,31 @@ class KalshiExchangeClient:
         )
 
     def _parse_trade(self, raw: dict[str, Any], *, token_id: str, expected_side: str) -> Trade | None:
+        # Same No-token inversion as _parse_open_order — see its comment.
         kalshi_side = str(raw.get("side") or "").lower()
-        raw_side = "yes" if kalshi_side == "bid" else "no"
-        if raw_side != expected_side:
+        if kalshi_side not in {"bid", "ask"}:
             return None
 
         order_id = str(raw.get("order_id") or raw.get("id") or "")
         if not order_id:
             return None
 
-        raw_price = _dollar_field(raw, "yes_price_dollars" if kalshi_side == "bid" else "no_price_dollars", "price")
+        raw_price = _dollar_field(raw, "yes_price_dollars", "price")
         our_price = raw_price if expected_side == "yes" else (1.0 - raw_price if raw_price else 0.0)
         size = float(raw.get("filled_count", raw.get("count", 0)) or 0)
         if size <= 0:
             return None
 
+        if expected_side == "yes":
+            our_side_enum = Side.BUY if kalshi_side == "bid" else Side.SELL
+        else:
+            our_side_enum = Side.SELL if kalshi_side == "bid" else Side.BUY
+
         return Trade(
             trade_id=str(raw.get("trade_id") or order_id),
             order_id=order_id,
             token_id=token_id,
-            side=Side.BUY if kalshi_side == "bid" else Side.SELL,
+            side=our_side_enum,
             price=our_price,
             size=size,
             fee=float(raw.get("taker_fees_dollars", raw.get("fees", 0)) or 0),

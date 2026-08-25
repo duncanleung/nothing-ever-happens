@@ -137,24 +137,26 @@ def test_fetch_kalshi_markets_paginates_markets_endpoint_directly(monkeypatch):
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets("https://example.test", max_no_price=0.10, min_volume=0.0)
+    result = fetch_kalshi_markets("https://example.test", max_no_price=0.10, min_volume=0.0)
 
-    assert [m.ticker for m in markets] == ["KXPOL-A"]
-    assert markets[0].no_price == pytest.approx(0.08)
+    assert result.is_complete is True
+    assert [m.ticker for m in result.markets] == ["KXPOL-A"]
+    assert result.markets[0].no_price == pytest.approx(0.08)
     # Only /markets was hit — no /series or /events fan-out.
     assert all(url.endswith("/markets") for url, _ in seen_urls)
     assert any(params.get("status") == "open" for _, params in seen_urls)
 
 
-def test_fetch_kalshi_markets_returns_empty_on_fetch_error(monkeypatch):
+def test_fetch_kalshi_markets_flags_incomplete_on_fetch_error(monkeypatch):
     def fake_get(url, params=None, timeout=None):
         raise requests.RequestException("boom")
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets("https://example.test")
+    result = fetch_kalshi_markets("https://example.test")
 
-    assert markets == []
+    assert result.markets == []
+    assert result.is_complete is False
 
 
 def test_fetch_kalshi_markets_via_series_walk_filters_categories_and_price(monkeypatch):
@@ -182,13 +184,14 @@ def test_fetch_kalshi_markets_via_series_walk_filters_categories_and_price(monke
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets_via_series_walk("https://example.test", max_no_price=0.10, min_volume=0.0)
+    result = fetch_kalshi_markets_via_series_walk("https://example.test", max_no_price=0.10, min_volume=0.0)
 
-    assert [m.ticker for m in markets] == ["KXPOL-A"]
-    assert markets[0].category == "politics"
+    assert result.is_complete is True
+    assert [m.ticker for m in result.markets] == ["KXPOL-A"]
+    assert result.markets[0].category == "politics"
 
 
-def test_fetch_kalshi_markets_via_series_walk_skips_series_on_fetch_error(monkeypatch):
+def test_fetch_kalshi_markets_via_series_walk_flags_incomplete_on_series_fetch_error(monkeypatch):
     def fake_get(url, params=None, timeout=None):
         if url.endswith("/series"):
             return _FakeResponse({"series": [{"ticker": "KXPOL", "category": "Politics"}], "cursor": ""})
@@ -196,6 +199,19 @@ def test_fetch_kalshi_markets_via_series_walk_skips_series_on_fetch_error(monkey
 
     monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
 
-    markets = fetch_kalshi_markets_via_series_walk("https://example.test")
+    result = fetch_kalshi_markets_via_series_walk("https://example.test")
 
-    assert markets == []
+    assert result.markets == []
+    assert result.is_complete is False
+
+
+def test_fetch_kalshi_markets_via_series_walk_flags_incomplete_when_series_list_fails(monkeypatch):
+    def fake_get(url, params=None, timeout=None):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
+
+    result = fetch_kalshi_markets_via_series_walk("https://example.test")
+
+    assert result.markets == []
+    assert result.is_complete is False

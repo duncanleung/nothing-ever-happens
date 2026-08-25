@@ -45,9 +45,11 @@ def _validate_live_runtime(exchange_cfg, database_url: str | None) -> None:
 
 def _build_exchange(exchange_cfg):
     if isinstance(exchange_cfg, KalshiConfig):
+        if not exchange_cfg.live_send_enabled:
+            return PaperExchangeClient()
         from bot.exchange.kalshi import KalshiExchangeClient
 
-        return KalshiExchangeClient(exchange_cfg, allow_trading=exchange_cfg.live_send_enabled)
+        return KalshiExchangeClient(exchange_cfg, allow_trading=True)
     if exchange_cfg.live_send_enabled:
         from bot.exchange.polymarket_clob import PolymarketClobExchangeClient
 
@@ -57,7 +59,17 @@ def _build_exchange(exchange_cfg):
 
 def _resolve_live_wallet_address(exchange_cfg) -> str | None:
     if isinstance(exchange_cfg, KalshiConfig):
-        return None  # Kalshi has no on-chain wallet.
+        # Kalshi has no on-chain wallet — this is a truthy sentinel, not an
+        # address. It only matters for its truthiness: it keeps the strategy
+        # from skipping remote position sync on restart (nothing_happens.py
+        # then calls KalshiExchangeClient.get_open_positions(), not the
+        # Polymarket-only _fetch_open_positions/data-api path — see MF6 in
+        # .ai/status/qua319-review.md). Gated on live_send_enabled to match
+        # the Polymarket branch below: in paper mode the exchange is
+        # PaperExchangeClient, which has no get_open_positions, so this must
+        # stay None or the strategy would fall through to the Polymarket
+        # data-api path with a garbage wallet address.
+        return "kalshi" if exchange_cfg.live_send_enabled else None
     if not exchange_cfg.live_send_enabled:
         return None
     if exchange_cfg.signature_type in {1, 2}:

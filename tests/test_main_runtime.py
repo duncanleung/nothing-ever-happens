@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bot.config import ExchangeConfig
+from bot.config import ExchangeConfig, KalshiConfig
 from bot.exchange.paper import PaperExchangeClient
 from bot.main import _build_exchange, _resolve_live_wallet_address, _validate_live_runtime
 
@@ -63,3 +63,28 @@ def test_resolve_live_wallet_address_uses_signer_for_direct_eoa():
         wallet_address = _resolve_live_wallet_address(exchange)
     assert wallet_address == "0xsigner"
     from_key.assert_called_once_with("0xabc")
+
+
+def test_build_exchange_uses_paper_client_for_kalshi_when_live_send_disabled():
+    exchange = KalshiConfig(api_key_id="key-123", private_key_path="keys/kalshi_private.pem", live_send_enabled=False)
+    built = _build_exchange(exchange)
+    assert isinstance(built, PaperExchangeClient)
+
+
+def test_build_exchange_uses_kalshi_client_when_live_send_enabled():
+    exchange = KalshiConfig(api_key_id="key-123", private_key_path="keys/kalshi_private.pem", live_send_enabled=True)
+    sentinel = object()
+    with patch("bot.exchange.kalshi.KalshiExchangeClient", return_value=sentinel) as factory:
+        built = _build_exchange(exchange)
+    assert built is sentinel
+    factory.assert_called_once_with(exchange, allow_trading=True)
+
+
+def test_resolve_live_wallet_address_returns_none_for_kalshi_paper_mode():
+    exchange = KalshiConfig(api_key_id="key-123", private_key_path="keys/kalshi_private.pem", live_send_enabled=False)
+    assert _resolve_live_wallet_address(exchange) is None
+
+
+def test_resolve_live_wallet_address_returns_sentinel_for_kalshi_live_mode():
+    exchange = KalshiConfig(api_key_id="key-123", private_key_path="keys/kalshi_private.pem", live_send_enabled=True)
+    assert _resolve_live_wallet_address(exchange) == "kalshi"

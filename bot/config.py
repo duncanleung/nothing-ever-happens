@@ -144,11 +144,11 @@ class KalshiConfig:
             )
 
 
-def _build_kalshi_config() -> KalshiConfig:
+def _build_kalshi_config(kalshi_section: dict[str, Any]) -> KalshiConfig:
     kalshi = KalshiConfig(
         api_key_id=_env_optional("KALSHI_API_KEY_ID") or "",
         private_key_path=_env_optional("KALSHI_PRIVATE_KEY_PATH") or "",
-        environment=(os.getenv("KALSHI_ENVIRONMENT") or "demo").strip().lower(),
+        environment=str(kalshi_section.get("environment", "demo")).strip().lower(),
         live_send_enabled=_compute_live_send_enabled(),
     )
     kalshi.validate()
@@ -186,7 +186,10 @@ def _load_nothing_happens_config(
 
     exchange_name = str(cfg.get("exchange", "polymarket") or "polymarket").strip().lower()
     if exchange_name == "kalshi":
-        exchange: ExchangeConfig | KalshiConfig = _build_kalshi_config()
+        kalshi_section = cfg.get("kalshi", {})
+        if not isinstance(kalshi_section, dict):
+            raise ValueError("config.json field 'kalshi' must be an object")
+        exchange: ExchangeConfig | KalshiConfig = _build_kalshi_config(kalshi_section)
     elif exchange_name == "polymarket":
         conn = cfg.get("connection", {})
         if not isinstance(conn, dict):

@@ -2,6 +2,7 @@ _ORDER_STATUS_ALIASES = {
     "canceled": "cancelled",
     "cancelled": "cancelled",
     "delayed": "delayed",
+    "executed": "matched",  # Kalshi: a filled order.
     "filled": "filled",
     "live": "live",
     "matched": "matched",
@@ -11,6 +12,7 @@ _ORDER_STATUS_ALIASES = {
     "partial_filled": "partially_filled",
     "partially_filled": "partially_filled",
     "rejected": "rejected",
+    "resting": "live",  # Kalshi: an unfilled order still on the book.
     "simulated": "simulated",
     "submitted": "submitted",
     "unmatched": "unmatched",

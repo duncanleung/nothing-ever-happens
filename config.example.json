@@ -5,6 +5,9 @@
     "chain_id": 137,
     "signature_type": 2
   },
+  "kalshi": {
+    "environment": "demo"
+  },
   "strategies": {
     "nothing_happens": {
       "market_refresh_interval_sec": 600,

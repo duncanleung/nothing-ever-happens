@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 import requests
 
@@ -176,6 +176,16 @@ def build_kalshi_market(market: dict[str, Any], *, series_ticker: str, category:
     )
 
 
+class MarketScanResult(NamedTuple):
+    """Result of a market scan — ``is_complete`` is False when pagination
+    failed partway through, so callers can tell a real (if short) list of
+    qualifying markets apart from one that's merely incomplete (see MF4 in
+    .ai/status/qua319-review.md)."""
+
+    markets: list[KalshiMarket]
+    is_complete: bool
+
+
 def qualifies(market: KalshiMarket, *, max_no_price: float, min_volume: float) -> bool:
     if market.no_price <= 0 or market.no_price > max_no_price:
         return False
@@ -189,7 +199,7 @@ def fetch_kalshi_markets(
     *,
     max_no_price: float = DEFAULT_MAX_NO_PRICE,
     min_volume: float = DEFAULT_MIN_VOLUME,
-) -> list[KalshiMarket]:
+) -> MarketScanResult:
     """Scan open Kalshi markets for cheap No positions.
 
     Paginates GET /markets?status=open directly — one call chain regardless
@@ -203,8 +213,13 @@ def fetch_kalshi_markets(
     every open, non-MVE, priced-within-range market qualifies regardless of
     category. Use the series-walk fallback if category filtering is required
     and the call volume is acceptable.
+
+    Returns a ``MarketScanResult`` — check ``.is_complete`` before treating
+    ``.markets`` as the full set: a mid-pagination failure still returns
+    whatever was collected so far, with ``is_complete=False``.
     """
     markets: list[KalshiMarket] = []
+    is_complete = True
     try:
         raw_markets = _paginate(base_url, "/markets", {"status": "open", "limit": PAGE_LIMIT}, "markets")
         for raw_market in raw_markets:
@@ -214,9 +229,10 @@ def fetch_kalshi_markets(
                 markets.append(built)
     except KalshiMarketFetchError as exc:
         logger.warning("kalshi_markets_scan_failed", extra={"error": str(exc)})
+        is_complete = False
 
     markets.sort(key=lambda m: m.volume, reverse=True)
-    return markets
+    return MarketScanResult(markets=markets, is_complete=is_complete)
 
 
 def fetch_kalshi_markets_via_series_walk(
@@ -224,17 +240,25 @@ def fetch_kalshi_markets_via_series_walk(
     *,
     max_no_price: float = DEFAULT_MAX_NO_PRICE,
     min_volume: float = DEFAULT_MIN_VOLUME,
-) -> list[KalshiMarket]:
+) -> MarketScanResult:
     """Category-filtered fallback: /series -> /events?series_ticker=X per target series.
 
     Kept for when category filtering matters more than call volume. Not the
-    default — see ``fetch_kalshi_markets``'s docstring.
+    default — see ``fetch_kalshi_markets``'s docstring. Returns a
+    ``MarketScanResult`` — ``is_complete`` is False if any series' /events
+    fetch failed, even though markets already collected are still returned.
     """
-    all_series = fetch_series(base_url)
+    markets: list[KalshiMarket] = []
+    is_complete = True
+    try:
+        all_series = fetch_series(base_url)
+    except KalshiMarketFetchError as exc:
+        logger.warning("kalshi_series_list_failed", extra={"error": str(exc)})
+        return MarketScanResult(markets=markets, is_complete=False)
+
     series_by_ticker = {str(s.get("ticker")): s for s in all_series if s.get("ticker")}
     target_tickers = _target_series_tickers(all_series)
 
-    markets: list[KalshiMarket] = []
     for series_ticker in target_tickers:
         category = _series_category(series_by_ticker.get(series_ticker, {}))
         try:
@@ -256,7 +280,8 @@ def fetch_kalshi_markets_via_series_walk(
                         markets.append(built)
         except KalshiMarketFetchError as exc:
             logger.warning("kalshi_series_scan_failed", extra={"series_ticker": series_ticker, "error": str(exc)})
+            is_complete = False
             continue
 
     markets.sort(key=lambda m: m.volume, reverse=True)
-    return markets
+    return MarketScanResult(markets=markets, is_complete=is_complete)

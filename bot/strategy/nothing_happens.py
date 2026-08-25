@@ -483,7 +483,17 @@ class NothingHappensRuntime:
         fetched_positions: list[dict] | None = []
         if self.wallet_address:
             try:
-                fetched_positions = await _fetch_open_positions(self.session, self.wallet_address)
+                # KalshiExchangeClient exposes get_open_positions() (its own
+                # GET /portfolio/positions wrapper) instead of a real wallet
+                # address for _fetch_open_positions' Polymarket data-api call
+                # — see bot/main.py:_resolve_live_wallet_address and MF6 in
+                # .ai/status/qua319-review.md.
+                if hasattr(self.exchange, "get_open_positions"):
+                    fetched_positions = await _run_blocking(
+                        self.background_executor, self.exchange.get_open_positions
+                    )
+                else:
+                    fetched_positions = await _fetch_open_positions(self.session, self.wallet_address)
                 self._remote_positions_ready = True
             except Exception as exc:
                 fetched_positions = None

@@ -1,10 +1,17 @@
 import base64
 
 import pytest
+import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from bot.exchange.kalshi_auth import KalshiAuthError, KalshiAuthSession, load_private_key, sign_message
+from bot.exchange.kalshi_auth import (
+    KalshiApiError,
+    KalshiAuthError,
+    KalshiAuthSession,
+    load_private_key,
+    sign_message,
+)
 
 
 @pytest.fixture
@@ -100,3 +107,63 @@ def test_kalshi_auth_session_signs_request_headers(rsa_key_path, monkeypatch):
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
         hashes.SHA256(),
     )
+
+
+class _FakeHttpResponse:
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+        self.content = b"non-empty"
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error")
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json body")
+        return self._payload
+
+
+def _session_with_fake_response(rsa_key_path, monkeypatch, response):
+    path, _ = rsa_key_path
+    session = KalshiAuthSession(api_key_id="key-123", private_key_path=str(path), base_url="https://example.test")
+    monkeypatch.setattr(session, "_request", lambda method, path_, **kwargs: response)
+    return session
+
+
+def test_request_json_returns_parsed_body_on_success(rsa_key_path, monkeypatch):
+    session = _session_with_fake_response(
+        rsa_key_path, monkeypatch, _FakeHttpResponse(200, payload={"balance": 100})
+    )
+
+    result = session.request_json("GET", "/portfolio/balance")
+
+    assert result == {"balance": 100}
+
+
+def test_request_json_raises_kalshi_api_error_with_body_on_failure(rsa_key_path, monkeypatch):
+    session = _session_with_fake_response(
+        rsa_key_path,
+        monkeypatch,
+        _FakeHttpResponse(400, payload={"error": {"code": "bad_request", "message": "ticker missing"}}),
+    )
+
+    with pytest.raises(KalshiApiError) as exc_info:
+        session.request_json("GET", "/markets/FOO")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.method == "GET"
+    assert exc_info.value.path == "/markets/FOO"
+    assert "bad_request" in str(exc_info.value)
+    assert "ticker missing" in str(exc_info.value)
+
+
+def test_request_json_falls_back_to_raw_text_on_non_json_error_body(rsa_key_path, monkeypatch):
+    session = _session_with_fake_response(
+        rsa_key_path, monkeypatch, _FakeHttpResponse(500, payload=None, text="internal server error")
+    )
+
+    with pytest.raises(KalshiApiError, match="internal server error"):
+        session.request_json("GET", "/portfolio/balance")

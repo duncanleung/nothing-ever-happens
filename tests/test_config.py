@@ -170,14 +170,45 @@ def test_load_nothing_happens_config_kalshi_requires_api_key_id(tmp_path, monkey
 def test_load_nothing_happens_config_kalshi_production_base_url(tmp_path, monkeypatch) -> None:
     payload = _base_config()
     payload["exchange"] = "kalshi"
+    payload["kalshi"] = {"environment": "production"}
     monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
     monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
     monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
-    monkeypatch.setenv("KALSHI_ENVIRONMENT", "production")
 
     exchange, _ = load_nothing_happens_config()
 
     assert exchange.base_url == "https://external-api.kalshi.com/trade-api/v2"
+
+
+def test_load_nothing_happens_config_kalshi_environment_read_from_config_json_not_env(
+    tmp_path, monkeypatch
+) -> None:
+    # MF2: non-secret settings (environment) live in config.json, not .env —
+    # an env var of the same old name must not override it.
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    payload["kalshi"] = {"environment": "production"}
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+    monkeypatch.setenv("KALSHI_ENVIRONMENT", "demo")
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert exchange.environment == "production"
+    assert exchange.base_url == "https://external-api.kalshi.com/trade-api/v2"
+
+
+def test_load_nothing_happens_config_kalshi_rejects_non_object_section(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    payload["kalshi"] = "not-an-object"
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+
+    with pytest.raises(ValueError, match="'kalshi' must be an object"):
+        load_nothing_happens_config()
 
 
 def test_load_nothing_happens_config_rejects_unsupported_exchange(tmp_path, monkeypatch) -> None:

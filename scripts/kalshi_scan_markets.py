@@ -19,19 +19,22 @@ def main() -> None:
     base_url = PROD_BASE_URL if environment == "production" else DEMO_BASE_URL
 
     try:
-        markets = fetch_kalshi_markets(base_url, max_no_price=DEFAULT_MAX_NO_PRICE)
+        result = fetch_kalshi_markets(base_url, max_no_price=DEFAULT_MAX_NO_PRICE)
     except KalshiMarketFetchError as exc:
         print(f"scan failed: {exc}")
         sys.exit(1)
 
+    markets = result.markets
     print(f"environment={environment} base_url={base_url} max_no_price={DEFAULT_MAX_NO_PRICE}")
-    print(f"qualifying markets: {len(markets)}")
+    print(f"qualifying markets: {len(markets)}{'' if result.is_complete else ' (PARTIAL — scan did not finish)'}")
     for market in markets[:50]:
         print(
             f"  {market.ticker:20s} no={market.no_price:.2f} vol={market.volume:>10.0f} "
             f"cat={market.category:12s} {market.question[:60]}"
         )
 
+    if not result.is_complete:
+        print("\nWARNING: scan failed partway through — the count above is a lower bound, not a full result")
     if len(markets) < 50:
         print(f"\nWARNING: only {len(markets)} qualifying markets found (<50) — premise needs revisiting")
 
