@@ -218,3 +218,49 @@ def test_load_nothing_happens_config_rejects_unsupported_exchange(tmp_path, monk
 
     with pytest.raises(ValueError, match="Unsupported exchange"):
         load_nothing_happens_config()
+
+
+def test_load_nothing_happens_config_paper_real_prices_defaults_false(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, _base_config()))
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert exchange.paper_real_prices is False
+
+
+def test_load_nothing_happens_config_paper_real_prices_requires_private_key(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["paper_real_prices"] = True
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.delenv("PRIVATE_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="PRIVATE_KEY"):
+        load_nothing_happens_config()
+
+
+def test_load_nothing_happens_config_paper_real_prices_enabled_with_private_key(
+    tmp_path, monkeypatch
+) -> None:
+    payload = _base_config()
+    payload["paper_real_prices"] = True
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("PRIVATE_KEY", "0xabc")
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert exchange.paper_real_prices is True
+    assert exchange.live_send_enabled is False
+
+
+def test_load_nothing_happens_config_paper_real_prices_not_read_for_kalshi(tmp_path, monkeypatch) -> None:
+    payload = _base_config()
+    payload["exchange"] = "kalshi"
+    payload["paper_real_prices"] = True
+    monkeypatch.setenv("CONFIG_PATH", _write_config(tmp_path, payload))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "key-123")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_private.pem")
+
+    exchange, _ = load_nothing_happens_config()
+
+    assert isinstance(exchange, KalshiConfig)
+    assert not hasattr(exchange, "paper_real_prices")

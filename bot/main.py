@@ -54,6 +54,13 @@ def _build_exchange(exchange_cfg):
         from bot.exchange.polymarket_clob import PolymarketClobExchangeClient
 
         return PolymarketClobExchangeClient(exchange_cfg, allow_trading=True)
+    if exchange_cfg.paper_real_prices:
+        from bot.exchange.polymarket_clob import PolymarketClobExchangeClient
+        from bot.exchange.real_price_paper import RealPricePaperExchangeClient
+
+        logger.info("paper_mode_real_prices_enabled", extra={"exchange": "polymarket"})
+        live_reader = PolymarketClobExchangeClient(exchange_cfg, allow_trading=False)
+        return RealPricePaperExchangeClient(live_reader)
     return PaperExchangeClient()
 
 

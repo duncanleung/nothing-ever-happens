@@ -88,3 +88,42 @@ def test_resolve_live_wallet_address_returns_none_for_kalshi_paper_mode():
 def test_resolve_live_wallet_address_returns_sentinel_for_kalshi_live_mode():
     exchange = KalshiConfig(api_key_id="key-123", private_key_path="keys/kalshi_private.pem", live_send_enabled=True)
     assert _resolve_live_wallet_address(exchange) == "kalshi"
+
+
+def test_build_exchange_uses_real_price_paper_client_when_enabled():
+    from bot.exchange.real_price_paper import RealPricePaperExchangeClient
+
+    exchange = ExchangeConfig(
+        host="https://clob.polymarket.com",
+        chain_id=137,
+        signature_type=0,
+        private_key="0xabc",
+        funder_address=None,
+        live_send_enabled=False,
+        paper_real_prices=True,
+    )
+    sentinel = object()
+    with patch("bot.exchange.polymarket_clob.PolymarketClobExchangeClient", return_value=sentinel) as factory:
+        built = _build_exchange(exchange)
+
+    assert isinstance(built, RealPricePaperExchangeClient)
+    assert built._live is sentinel
+    factory.assert_called_once_with(exchange, allow_trading=False)
+
+
+def test_build_exchange_prefers_live_client_over_paper_real_prices_when_both_set():
+    exchange = ExchangeConfig(
+        host="https://clob.polymarket.com",
+        chain_id=137,
+        signature_type=0,
+        private_key="0xabc",
+        funder_address=None,
+        live_send_enabled=True,
+        paper_real_prices=True,
+    )
+    sentinel = object()
+    with patch("bot.exchange.polymarket_clob.PolymarketClobExchangeClient", return_value=sentinel) as factory:
+        built = _build_exchange(exchange)
+
+    assert built is sentinel
+    factory.assert_called_once_with(exchange, allow_trading=True)

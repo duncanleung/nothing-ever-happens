@@ -81,6 +81,7 @@ class ExchangeConfig:
     private_key: str | None
     funder_address: str | None
     live_send_enabled: bool = False
+    paper_real_prices: bool = False
 
     def validate(self) -> None:
         if self.signature_type not in {0, 1, 2}:
@@ -101,9 +102,14 @@ class ExchangeConfig:
                 "FUNDER_ADDRESS is required in live mode with signature_type "
                 f"{self.signature_type} (proxy/delegated wallet)"
             )
+        if self.paper_real_prices and not self.private_key:
+            raise ValueError(
+                "PRIVATE_KEY is required when paper_real_prices is enabled "
+                "(needed for CLOB API auth to read real order books)"
+            )
 
 
-def _build_exchange_config(conn: dict[str, Any]) -> ExchangeConfig:
+def _build_exchange_config(conn: dict[str, Any], paper_real_prices: bool) -> ExchangeConfig:
     exchange = ExchangeConfig(
         host=str(conn.get("host", "https://clob.polymarket.com")),
         chain_id=int(conn.get("chain_id", 137)),
@@ -111,6 +117,7 @@ def _build_exchange_config(conn: dict[str, Any]) -> ExchangeConfig:
         private_key=_env_optional("PRIVATE_KEY"),
         funder_address=_env_optional("FUNDER_ADDRESS"),
         live_send_enabled=_compute_live_send_enabled(),
+        paper_real_prices=paper_real_prices,
     )
     exchange.validate()
     return exchange
@@ -194,7 +201,8 @@ def _load_nothing_happens_config(
         conn = cfg.get("connection", {})
         if not isinstance(conn, dict):
             raise ValueError("config.json field 'connection' must be an object")
-        exchange = _build_exchange_config(conn)
+        paper_real_prices = bool(cfg.get("paper_real_prices", False))
+        exchange = _build_exchange_config(conn, paper_real_prices=paper_real_prices)
     else:
         raise ValueError(f"Unsupported exchange {exchange_name!r}. Must be 'polymarket' or 'kalshi'.")
 
