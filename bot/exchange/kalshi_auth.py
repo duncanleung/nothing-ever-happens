@@ -12,6 +12,7 @@ import base64
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -120,7 +121,9 @@ class KalshiAuthSession:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         timestamp_ms = str(int(time.time() * 1000))
-        message = f"{timestamp_ms}{method}{path}"
+        url = f"{self._base_url}{path}"
+        sign_path = urlparse(url).path
+        message = f"{timestamp_ms}{method}{sign_path}"
         headers = {
             "KALSHI-ACCESS-KEY": self._key_id,
             "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
@@ -128,6 +131,5 @@ class KalshiAuthSession:
             "Content-Type": "application/json",
         }
         headers.update(kwargs.pop("headers", None) or {})
-        url = f"{self._base_url}{path}"
         kwargs.setdefault("timeout", self._timeout)
         return self._session.request(method, url, headers=headers, **kwargs)

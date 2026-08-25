@@ -99,7 +99,7 @@ def test_kalshi_auth_session_signs_request_headers(rsa_key_path, monkeypatch):
     timestamp_ms = headers["KALSHI-ACCESS-TIMESTAMP"]
     assert timestamp_ms.isdigit()
 
-    message = f"{timestamp_ms}GET/portfolio/balance"
+    message = f"{timestamp_ms}GET/trade-api/v2/portfolio/balance"
     public_key = private_key.public_key()
     public_key.verify(
         base64.b64decode(headers["KALSHI-ACCESS-SIGNATURE"]),
