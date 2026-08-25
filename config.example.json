@@ -1,5 +1,6 @@
 {
   "exchange": "polymarket",
+  "paper_real_prices": false,
   "connection": {
     "host": "https://clob.polymarket.com",
     "chain_id": 137,
