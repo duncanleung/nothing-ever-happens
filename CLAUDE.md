@@ -10,6 +10,7 @@ Fork of `sterlingcrispin/nothing-ever-happens` — a Python bot that sells longs
 - **Vault project docs:** `/Users/duncanleung/Documents/obsidian-local-life-manager/projects/kalshi-trading-bot/`
   - `project-brief.md` — vision, problem, audience
   - `2026-08-23-deep-research-findings.md` — deep research on Kalshi auto-trading
+  - `2026-08-25-combinatorial-arb-deep-research.md` — corrected arb strategy research (combinatorial arb is 0.24%, NegRisk rebalancing is 73.3%)
   - `fee-breakeven.py` — fee breakeven calculator
 - **Vault research wiki:** `/Users/duncanleung/Documents/obsidian-local-life-manager/research/wiki/`
   - `prediction-market-edges.md` — strategy edges
