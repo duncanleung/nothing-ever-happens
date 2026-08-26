@@ -380,6 +380,13 @@ async def _iter_open_market_batches(session: aiohttp.ClientSession):
                 )
                 await asyncio.sleep(delay)
                 continue
+            if exc.status == 422:
+                logger.warning(
+                    "gamma_markets_pagination_cap_hit offset=%d err=%s",
+                    offset,
+                    exc,
+                )
+                return
             logger.warning(
                 "gamma_markets_fetch_aborted offset=%d status=%s err=%s",
                 offset,

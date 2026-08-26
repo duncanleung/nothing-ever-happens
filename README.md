@@ -101,6 +101,18 @@ python -m pytest -q
 | `scripts/wallet_history.py` | Pull positions, trades, and balances for the configured wallet |
 | `scripts/parse_logs.py` | Convert Heroku JSON logs into readable terminal or HTML output |
 
+## Project Documentation
+
+Strategy research, project briefs, and deep research findings live in the Obsidian vault at `projects/kalshi-trading-bot/`:
+
+- `project-brief.md` — vision, problem, audience
+- `2026-08-23-deep-research-findings.md` — Kalshi auto-trading deep research
+- `fee-breakeven.py` — fee breakeven calculator
+
+Related research wiki pages (in the vault's `research/wiki/`): `prediction-market-edges`, `longshot-bias`, `kalshi-sports-bot-architecture`, `polymarket-validation-agent`, `data-latency-hierarchy`.
+
+See `CLAUDE.md` for full paths and AI agent context.
+
 ## Repository Hygiene
 
 Local config, ledgers, exports, reports, and deployment artifacts are ignored by default.

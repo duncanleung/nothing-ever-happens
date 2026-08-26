@@ -37,6 +37,10 @@ htmlcov/
 # Local config
 config.json
 
+# API keys
+keys/
+*.pem
+
 # Vendored repos (reference only)
 vendor/
 
