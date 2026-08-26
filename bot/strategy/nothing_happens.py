@@ -616,17 +616,61 @@ class NothingHappensRuntime:
                 last_error=self._last_error,
             )
 
+    def _scan_arb_opportunity(
+        self,
+        market: StandaloneMarket,
+        yes_book: OrderBookSnapshot,
+        no_book: OrderBookSnapshot,
+    ) -> None:
+        yes_ask = _best_ask(yes_book)
+        no_ask = _best_ask(no_book)
+        if yes_ask <= 0 or no_ask <= 0:
+            return
+
+        pair_cost = yes_ask + no_ask
+        if pair_cost >= 1.0:
+            return
+
+        gross_spread = 1.0 - pair_cost
+        yes_depth = sum(level.size for level in yes_book.asks if level.price <= yes_ask + 1e-9)
+        no_depth = sum(level.size for level in no_book.asks if level.price <= no_ask + 1e-9)
+        executable_shares = min(yes_depth, no_depth)
+        executable_profit = executable_shares * gross_spread
+
+        logger.info(
+            "arb_opportunity_detected slug=%s yes_ask=%.4f no_ask=%.4f pair_cost=%.4f "
+            "gross_spread=%.4f yes_depth=%.1f no_depth=%.1f executable_shares=%.1f "
+            "executable_profit=%.4f",
+            market.slug,
+            yes_ask,
+            no_ask,
+            pair_cost,
+            gross_spread,
+            yes_depth,
+            no_depth,
+            executable_shares,
+            executable_profit,
+        )
+
     async def _evaluate_market(self, market: StandaloneMarket) -> None:
         async with self._book_semaphore:
             try:
-                book = await asyncio.wait_for(
-                    _run_blocking(self.background_executor, self.exchange.get_order_book, market.no_token_id),
+                no_book_fut = _run_blocking(
+                    self.background_executor, self.exchange.get_order_book, market.no_token_id
+                )
+                yes_book_fut = _run_blocking(
+                    self.background_executor, self.exchange.get_order_book, market.yes_token_id
+                )
+                book, yes_book = await asyncio.wait_for(
+                    asyncio.gather(no_book_fut, yes_book_fut),
                     timeout=20.0,
                 )
             except Exception as exc:
                 self._schedule_backoff(market.slug, failed=True)
                 logger.warning("nothing_happens_book_fetch_failed slug=%s err=%s", market.slug, exc)
                 return
+
+        self._scan_arb_opportunity(market, yes_book, book)
 
         no_ask = _best_ask(book)
         if no_ask <= 0 or no_ask > self.cfg.max_entry_price:
