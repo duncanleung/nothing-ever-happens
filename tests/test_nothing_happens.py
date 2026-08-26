@@ -304,6 +304,81 @@ def test_max_notional_within_price_only_counts_safe_asks() -> None:
     assert _max_notional_within_price(book, 0.65) == 19.0
 
 
+def test_scan_arb_logs_opportunity_when_pair_cost_below_one(caplog) -> None:
+    import logging
+
+    market = _make_market(slug="arb-market")
+    runtime = _make_runtime()
+
+    yes_book = _make_book(token_id="yes-arb-market", ask_price=0.40, ask_size=100.0)
+    no_book = _make_book(token_id="no-arb-market", ask_price=0.55, ask_size=50.0)
+
+    with caplog.at_level(logging.INFO):
+        runtime._scan_arb_opportunity(market, yes_book, no_book)
+
+    arb_logs = [r for r in caplog.records if r.message.startswith("arb_opportunity_detected")]
+    assert len(arb_logs) == 1
+    msg = arb_logs[0].message
+    assert "slug=arb-market" in msg
+    assert "yes_ask=0.4000" in msg
+    assert "no_ask=0.5500" in msg
+    assert "gross_spread=0.0500" in msg
+    assert "executable_shares=50.0" in msg
+
+
+def test_scan_arb_silent_when_pair_cost_at_or_above_one(caplog) -> None:
+    import logging
+
+    market = _make_market(slug="no-arb-market")
+    runtime = _make_runtime()
+
+    yes_book = _make_book(token_id="yes-no-arb-market", ask_price=0.50, ask_size=100.0)
+    no_book = _make_book(token_id="no-no-arb-market", ask_price=0.50, ask_size=100.0)
+
+    with caplog.at_level(logging.INFO):
+        runtime._scan_arb_opportunity(market, yes_book, no_book)
+
+    arb_logs = [r for r in caplog.records if r.message.startswith("arb_opportunity_detected")]
+    assert len(arb_logs) == 0
+
+
+def test_scan_arb_silent_when_ask_is_zero(caplog) -> None:
+    import logging
+
+    market = _make_market(slug="empty-book-market")
+    runtime = _make_runtime()
+
+    yes_book = OrderBookSnapshot(
+        token_id="yes-empty", bids=(), asks=(), tick_size=0.01, min_order_size=1.0
+    )
+    no_book = _make_book(token_id="no-empty", ask_price=0.05, ask_size=100.0)
+
+    with caplog.at_level(logging.INFO):
+        runtime._scan_arb_opportunity(market, yes_book, no_book)
+
+    arb_logs = [r for r in caplog.records if r.message.startswith("arb_opportunity_detected")]
+    assert len(arb_logs) == 0
+
+
+def test_scan_arb_executable_shares_uses_min_depth(caplog) -> None:
+    import logging
+
+    market = _make_market(slug="depth-market")
+    runtime = _make_runtime()
+
+    yes_book = _make_book(token_id="yes-depth", ask_price=0.30, ask_size=200.0)
+    no_book = _make_book(token_id="no-depth", ask_price=0.60, ask_size=10.0)
+
+    with caplog.at_level(logging.INFO):
+        runtime._scan_arb_opportunity(market, yes_book, no_book)
+
+    arb_logs = [r for r in caplog.records if r.message.startswith("arb_opportunity_detected")]
+    assert len(arb_logs) == 1
+    msg = arb_logs[0].message
+    assert "executable_shares=10.0" in msg
+    assert "executable_profit=1.0000" in msg
+
+
 @pytest.mark.asyncio
 async def test_sync_positions_preserves_existing_holdings_on_fetch_failure() -> None:
     runtime = _make_runtime(wallet_address="0xwallet")
