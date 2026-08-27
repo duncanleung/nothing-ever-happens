@@ -319,12 +319,14 @@ def test_get_open_positions_normalizes_and_splits_by_side(monkeypatch):
     positions = client.get_open_positions()
 
     assert len(positions) == 2
-    by_slug = {p["slug"]: p for p in positions}
-    assert by_slug["KXFOO:yes"]["size"] == pytest.approx(15)
-    assert by_slug["KXFOO:yes"]["outcome"] == "yes"
-    assert by_slug["KXFOO:yes"]["initialValue"] == pytest.approx(7.5)
-    assert by_slug["KXBAR:no"]["size"] == pytest.approx(8)
-    assert by_slug["KXBAR:no"]["outcome"] == "no"
+    by_asset = {p["asset"]: p for p in positions}
+    assert by_asset["KXFOO:yes"]["slug"] == "KXFOO"
+    assert by_asset["KXFOO:yes"]["size"] == pytest.approx(15)
+    assert by_asset["KXFOO:yes"]["outcome"] == "yes"
+    assert by_asset["KXFOO:yes"]["initialValue"] == pytest.approx(7.5)
+    assert by_asset["KXBAR:no"]["slug"] == "KXBAR"
+    assert by_asset["KXBAR:no"]["size"] == pytest.approx(8)
+    assert by_asset["KXBAR:no"]["outcome"] == "no"
 
 
 def test_get_open_positions_degrades_price_to_zero_on_lookup_failure(monkeypatch):

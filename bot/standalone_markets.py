@@ -8,7 +8,6 @@ import gc
 import json
 import logging
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -134,22 +133,7 @@ class GammaMarketFetchError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class StandaloneMarket:
-    question: str
-    slug: str
-    condition_id: str
-    yes_token_id: str
-    no_token_id: str
-    yes_price: float
-    no_price: float
-    volume: float
-    liquidity: float
-    min_order_size: float
-    end_date: str
-    end_ts: float
-    category: str
-    event_slug: str
+from bot.models import StandaloneMarket
 
 
 def _get_event_slug(market: dict) -> str:

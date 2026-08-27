@@ -431,7 +431,7 @@ async def test_sync_positions_uses_exchange_get_open_positions_when_available() 
 
     positions_payload = [
         {
-            "slug": "KXFOO:no",
+            "slug": "KXFOO",
             "title": "KXFOO",
             "outcome": "no",
             "asset": "KXFOO:no",
@@ -456,7 +456,7 @@ async def test_sync_positions_uses_exchange_get_open_positions_when_available() 
         await runtime._sync_positions()
 
     assert exchange.get_open_positions_calls == 1
-    assert "KXFOO:no" in runtime._positions_by_slug
+    assert "KXFOO" in runtime._positions_by_slug
     assert runtime._remote_positions_ready is True
 
 
