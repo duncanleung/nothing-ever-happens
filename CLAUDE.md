@@ -35,6 +35,12 @@ Fork of `sterlingcrispin/nothing-ever-happens` — a Python bot that sells longs
 - **No-price derivation** — Kalshi book is YES-only. Correct formula: `effective_no_price = 1 - yes_bid_dollars`.
 - **Maker orders only** — per QUA-320 fee analysis, taker fees bleed below 7c.
 
+## ADRs
+
+- Directory: `docs/decisions/`
+- Next number: 0005
+- Read ADRs before changing: exchange clients, order strategy, fee model
+
 ## Credentials
 
 All secrets are in `.env` (gitignored). Required for each exchange:
