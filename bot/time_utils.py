@@ -16,7 +16,7 @@ def parse_venue_timestamp(value: str | int | float | None) -> datetime | None:
 
     try:
         return _epoch_to_datetime(float(raw))
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         pass
 
     try:

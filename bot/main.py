@@ -234,6 +234,15 @@ async def run():
                 except Exception as exc:
                     logger.warning("drawdown_hwm_seed_failed: %s", exc)
 
+        market_fetcher = None
+        if isinstance(exchange_cfg, KalshiConfig):
+            from bot.kalshi_markets import make_kalshi_market_fetcher
+
+            market_fetcher = make_kalshi_market_fetcher(
+                base_url=exchange_cfg.base_url,
+                max_no_price=strategy_cfg.max_entry_price,
+            )
+
         feed_factories = {
             "strategy": lambda: nothing_happens.run(
                 exchange=exchange,
@@ -246,6 +255,7 @@ async def run():
                 control_state=nothing_happens_control,
                 recovery_coordinator=recovery,
                 wallet_address=strategy_wallet_address,
+                market_fetcher=market_fetcher,
             ),
         }
         if recovery is not None and exchange_cfg.live_send_enabled:

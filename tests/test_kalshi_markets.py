@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 import requests
 
@@ -6,6 +8,8 @@ from bot.kalshi_markets import (
     build_kalshi_market,
     fetch_kalshi_markets,
     fetch_kalshi_markets_via_series_walk,
+    kalshi_market_to_standalone,
+    make_kalshi_market_fetcher,
     qualifies,
 )
 
@@ -215,3 +219,102 @@ def test_fetch_kalshi_markets_via_series_walk_flags_incomplete_when_series_list_
 
     assert result.markets == []
     assert result.is_complete is False
+
+
+# --- KalshiMarket → StandaloneMarket adapter tests ---
+
+
+def _sample_kalshi_market(**overrides) -> KalshiMarket:
+    defaults = dict(
+        ticker="KXPOL-26-ABC",
+        event_ticker="KXPOL-26",
+        series_ticker="KXPOL",
+        question="Will something happen?",
+        yes_price=0.92,
+        no_price=0.08,
+        volume=1500.0,
+        open_interest=400.0,
+        close_time="2026-09-01T23:59:00Z",
+        category="politics",
+    )
+    defaults.update(overrides)
+    return KalshiMarket(**defaults)
+
+
+def test_kalshi_market_to_standalone_maps_all_fields():
+    km = _sample_kalshi_market()
+    sm = kalshi_market_to_standalone(km)
+
+    assert sm.slug == "KXPOL-26-ABC"
+    assert sm.condition_id == "KXPOL-26-ABC"
+    assert sm.question == "Will something happen?"
+    assert sm.yes_token_id == "KXPOL-26-ABC:yes"
+    assert sm.no_token_id == "KXPOL-26-ABC:no"
+    assert sm.yes_price == pytest.approx(0.92)
+    assert sm.no_price == pytest.approx(0.08)
+    assert sm.volume == pytest.approx(1500.0)
+    assert sm.liquidity == 0.0
+    assert sm.min_order_size == 1.0
+    assert sm.end_date == "2026-09-01T23:59:00Z"
+    assert sm.end_ts > 0
+    assert sm.category == "politics"
+    assert sm.event_slug == "KXPOL-26"
+
+
+def test_kalshi_market_to_standalone_handles_empty_close_time():
+    km = _sample_kalshi_market(close_time="")
+    sm = kalshi_market_to_standalone(km)
+    assert sm.end_ts == 0.0
+    assert sm.end_date == ""
+
+
+def test_make_kalshi_market_fetcher_returns_standalone_markets(monkeypatch):
+    km = _sample_kalshi_market()
+
+    def fake_get(url, params=None, timeout=None):
+        return _FakeResponse({"markets": [
+            {
+                "ticker": km.ticker,
+                "event_ticker": km.event_ticker,
+                "series_ticker": km.series_ticker,
+                "title": km.question,
+                "yes_bid_dollars": "0.92",
+                "yes_ask_dollars": "0.92",
+                "volume_24h": "1500",
+                "open_interest": "400",
+                "close_time": km.close_time,
+                "status": "open",
+            },
+        ], "cursor": ""})
+
+    monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
+
+    fetcher = make_kalshi_market_fetcher("https://example.test", max_no_price=0.10)
+    markets = asyncio.run(fetcher(None))
+
+    assert len(markets) == 1
+    assert markets[0].slug == "KXPOL-26-ABC"
+    assert markets[0].yes_token_id == "KXPOL-26-ABC:yes"
+
+
+def test_make_kalshi_market_fetcher_returns_empty_when_no_qualifying(monkeypatch):
+    def fake_get(url, params=None, timeout=None):
+        return _FakeResponse({"markets": [
+            {
+                "ticker": "KXFOO-26-X",
+                "event_ticker": "KXFOO-26",
+                "title": "Expensive market",
+                "yes_bid_dollars": "0.10",
+                "yes_ask_dollars": "0.15",
+                "volume_24h": "100",
+                "open_interest": "50",
+                "close_time": "2026-09-01T00:00:00Z",
+            },
+        ], "cursor": ""})
+
+    monkeypatch.setattr("bot.kalshi_markets.requests.get", fake_get)
+
+    fetcher = make_kalshi_market_fetcher("https://example.test", max_no_price=0.10)
+    markets = asyncio.run(fetcher(None))
+
+    assert markets == []

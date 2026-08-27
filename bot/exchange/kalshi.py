@@ -295,7 +295,7 @@ class KalshiExchangeClient:
                 price = 0.0
             result.append(
                 {
-                    "slug": token_id,
+                    "slug": ticker,
                     "title": ticker,
                     "outcome": side,
                     "asset": token_id,

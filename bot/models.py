@@ -131,3 +131,21 @@ class CancelOrder:
 
 
 StrategyAction = PlaceOrder | CancelOrder
+
+
+@dataclass(frozen=True)
+class StandaloneMarket:
+    question: str
+    slug: str
+    condition_id: str
+    yes_token_id: str
+    no_token_id: str
+    yes_price: float
+    no_price: float
+    volume: float
+    liquidity: float
+    min_order_size: float
+    end_date: str
+    end_ts: float
+    category: str
+    event_slug: str

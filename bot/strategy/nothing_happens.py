@@ -258,6 +258,7 @@ class NothingHappensRuntime:
         control_state: NothingHappensControlState | None,
         recovery_coordinator=None,
         wallet_address: str | None,
+        market_fetcher=None,
     ) -> None:
         self.exchange = exchange
         self.session = session
@@ -269,6 +270,7 @@ class NothingHappensRuntime:
         self.control_state = control_state
         self.recovery_coordinator = recovery_coordinator
         self.wallet_address = wallet_address
+        self._market_fetcher = market_fetcher or fetch_candidate_markets
 
         self._markets_by_slug: dict[str, StandaloneMarket] = {}
         self._positions_by_slug: dict[str, PositionSnapshot] = {}
@@ -449,7 +451,7 @@ class NothingHappensRuntime:
 
     async def _refresh_markets(self) -> None:
         try:
-            markets = await fetch_candidate_markets(self.session)
+            markets = await self._market_fetcher(self.session)
         except Exception as exc:
             self._last_error = f"markets_refresh_failed: {exc}"
             logger.warning("nothing_happens_markets_refresh_failed: %s", exc)
@@ -1490,6 +1492,7 @@ async def run(
     control_state: NothingHappensControlState | None,
     recovery_coordinator=None,
     wallet_address: str | None,
+    market_fetcher=None,
 ) -> None:
     runtime = NothingHappensRuntime(
         exchange=exchange,
@@ -1502,5 +1505,6 @@ async def run(
         control_state=control_state,
         recovery_coordinator=recovery_coordinator,
         wallet_address=wallet_address,
+        market_fetcher=market_fetcher,
     )
     await runtime.run()
