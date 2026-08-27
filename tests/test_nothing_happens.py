@@ -745,6 +745,49 @@ async def test_success_without_fill_quantities_quarantines_instead_of_fabricatin
     assert pending.last_error == "ambiguous_fill_data_missing"
 
 
+def test_runtime_uses_custom_market_fetcher_when_provided() -> None:
+    from bot.standalone_markets import StandaloneMarket
+
+    sentinel_market = StandaloneMarket(
+        question="Test?",
+        slug="test-slug",
+        condition_id="test-slug",
+        yes_token_id="test-slug:yes",
+        no_token_id="test-slug:no",
+        yes_price=0.90,
+        no_price=0.10,
+        volume=100.0,
+        liquidity=0.0,
+        min_order_size=1.0,
+        end_date="2026-09-01T00:00:00Z",
+        end_ts=1788307200.0,
+        category="test",
+        event_slug="test-event",
+    )
+
+    async def fake_fetcher(session):
+        return [sentinel_market]
+
+    runtime = _make_runtime()
+    assert runtime._market_fetcher is fetch_candidate_markets
+
+    runtime_custom = NothingHappensRuntime(
+        exchange=StubExchange(),
+        session=SimpleNamespace(),
+        cfg=NothingHappensConfig(),
+        risk=RiskController(
+            RiskConfig(max_total_open_exposure_usd=1_000.0, max_market_open_exposure_usd=1_000.0)
+        ),
+        background_executor=None,
+        shutdown_event=asyncio.Event(),
+        portfolio_state=None,
+        control_state=None,
+        wallet_address=None,
+        market_fetcher=fake_fetcher,
+    )
+    assert runtime_custom._market_fetcher is fake_fetcher
+
+
 @pytest.mark.asyncio
 async def test_fetch_open_positions_paginates_all_pages() -> None:
     first_page = [{"slug": f"market-{index}"} for index in range(100)]

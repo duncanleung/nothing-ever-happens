@@ -16,11 +16,15 @@ longshot bet). This scanner filters the same way: qualifying markets have
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterable, NamedTuple
 
 import requests
+
+from bot.standalone_markets import StandaloneMarket
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +237,61 @@ def fetch_kalshi_markets(
 
     markets.sort(key=lambda m: m.volume, reverse=True)
     return MarketScanResult(markets=markets, is_complete=is_complete)
+
+
+def _parse_close_time(value: str) -> float:
+    if not value:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return 0.0
+    return dt.timestamp()
+
+
+def kalshi_market_to_standalone(market: KalshiMarket) -> StandaloneMarket:
+    """Adapt a KalshiMarket to StandaloneMarket for the strategy loop."""
+    return StandaloneMarket(
+        question=market.question,
+        slug=market.ticker,
+        condition_id=market.ticker,
+        yes_token_id=market.yes_token_id,
+        no_token_id=market.no_token_id,
+        yes_price=market.yes_price,
+        no_price=market.no_price,
+        volume=market.volume,
+        liquidity=0.0,
+        min_order_size=1.0,
+        end_date=market.close_time,
+        end_ts=_parse_close_time(market.close_time),
+        category=market.category,
+        event_slug=market.event_ticker,
+    )
+
+
+def make_kalshi_market_fetcher(
+    base_url: str = DEMO_BASE_URL,
+    *,
+    max_no_price: float = DEFAULT_MAX_NO_PRICE,
+    min_volume: float = DEFAULT_MIN_VOLUME,
+):
+    """Return an async fetcher matching the fetch_candidate_markets signature.
+
+    The returned callable accepts ``(session)`` to match the Polymarket
+    fetcher interface, but ignores the session — Kalshi discovery uses
+    synchronous ``requests`` run via ``asyncio.to_thread``.
+    """
+
+    async def _fetch(session) -> list[StandaloneMarket]:
+        result = await asyncio.to_thread(
+            fetch_kalshi_markets,
+            base_url,
+            max_no_price=max_no_price,
+            min_volume=min_volume,
+        )
+        return [kalshi_market_to_standalone(m) for m in result.markets]
+
+    return _fetch
 
 
 def fetch_kalshi_markets_via_series_walk(
