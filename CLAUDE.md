@@ -2,11 +2,12 @@
 
 ## Overview
 
-Fork of `sterlingcrispin/nothing-ever-happens` — a Python bot that sells longshot prediction market contracts. Extended with Kalshi exchange support (QUA-319, complete) and Polymarket paper trading (QUA-317, in progress).
+Fork of `sterlingcrispin/nothing-ever-happens` — a Python bot that sells longshot prediction market contracts. Extended with Kalshi exchange support (PRE-2, complete) and Polymarket paper trading (PRE-1, complete).
 
 ## Project Tracking
 
-- **Linear workspace:** str-labs, team QUA
+- **Linear workspace:** str-labs, **team PRE** (Prediction Markets), project "Prediction Markets"
+- **Do NOT use team QUA** — QUA is for the quality-investor project, not this repo
 - **Vault project docs:** `/Users/duncanleung/Documents/obsidian-local-life-manager/projects/kalshi-trading-bot/`
   - `project-brief.md` — vision, problem, audience
   - `2026-08-23-deep-research-findings.md` — deep research on Kalshi auto-trading
