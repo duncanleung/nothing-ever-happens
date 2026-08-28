@@ -87,8 +87,9 @@ def test_qualifies_filters_on_price_and_volume():
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
@@ -97,34 +98,40 @@ class _FakeResponse:
         return self._payload
 
 
-def test_fetch_kalshi_markets_paginates_markets_endpoint_directly(monkeypatch):
+def test_fetch_kalshi_markets_paginates_events_endpoint(monkeypatch):
     responses = {
-        "/markets": {
-            "markets": [
+        "/events": {
+            "events": [
                 {
-                    "ticker": "KXPOL-A",
-                    "event_ticker": "KXPOL-EVT",
-                    "title": "Q1",
-                    "yes_bid_dollars": "0.92",
-                    "yes_ask_dollars": "0.95",
-                    "volume_24h": "200",
-                },
-                {
-                    "ticker": "KXPOL-B",
-                    "event_ticker": "KXPOL-EVT",
-                    "title": "Q2",
-                    "yes_bid_dollars": "0.50",
-                    "yes_ask_dollars": "0.50",
-                    "volume_24h": "200",
-                },
-                # MVE parlay market — zero liquidity, no_ask stuck at 1.0.
-                {
-                    "ticker": "KXMVECROSSCATEGORY-C",
-                    "event_ticker": "KXMVECROSSCATEGORY-EVT",
-                    "title": "Combo",
-                    "yes_bid_dollars": "0.00",
-                    "yes_ask_dollars": "0.00",
-                    "volume_24h": "0",
+                    "ticker": "KXPOL-EVT",
+                    "series_ticker": "KXPOL",
+                    "category": "Politics",
+                    "markets": [
+                        {
+                            "ticker": "KXPOL-A",
+                            "event_ticker": "KXPOL-EVT",
+                            "title": "Q1",
+                            "yes_bid_dollars": "0.92",
+                            "yes_ask_dollars": "0.95",
+                            "volume_24h": "200",
+                        },
+                        {
+                            "ticker": "KXPOL-B",
+                            "event_ticker": "KXPOL-EVT",
+                            "title": "Q2",
+                            "yes_bid_dollars": "0.50",
+                            "yes_ask_dollars": "0.50",
+                            "volume_24h": "200",
+                        },
+                        {
+                            "ticker": "KXMVECROSSCATEGORY-C",
+                            "event_ticker": "KXMVECROSSCATEGORY-EVT",
+                            "title": "Combo",
+                            "yes_bid_dollars": "0.00",
+                            "yes_ask_dollars": "0.00",
+                            "volume_24h": "0",
+                        },
+                    ],
                 },
             ],
             "cursor": "",
@@ -146,9 +153,9 @@ def test_fetch_kalshi_markets_paginates_markets_endpoint_directly(monkeypatch):
     assert result.is_complete is True
     assert [m.ticker for m in result.markets] == ["KXPOL-A"]
     assert result.markets[0].no_price == pytest.approx(0.08)
-    # Only /markets was hit — no /series or /events fan-out.
-    assert all(url.endswith("/markets") for url, _ in seen_urls)
-    assert any(params.get("status") == "open" for _, params in seen_urls)
+    assert result.markets[0].category == "politics"
+    assert all(url.endswith("/events") for url, _ in seen_urls)
+    assert any(params.get("with_nested_markets") == "true" for _, params in seen_urls)
 
 
 def test_fetch_kalshi_markets_flags_incomplete_on_fetch_error(monkeypatch):
@@ -272,18 +279,25 @@ def test_make_kalshi_market_fetcher_returns_standalone_markets(monkeypatch):
     km = _sample_kalshi_market()
 
     def fake_get(url, params=None, timeout=None):
-        return _FakeResponse({"markets": [
+        return _FakeResponse({"events": [
             {
-                "ticker": km.ticker,
-                "event_ticker": km.event_ticker,
+                "ticker": km.event_ticker,
                 "series_ticker": km.series_ticker,
-                "title": km.question,
-                "yes_bid_dollars": "0.92",
-                "yes_ask_dollars": "0.92",
-                "volume_24h": "1500",
-                "open_interest": "400",
-                "close_time": km.close_time,
-                "status": "open",
+                "category": "Politics",
+                "markets": [
+                    {
+                        "ticker": km.ticker,
+                        "event_ticker": km.event_ticker,
+                        "series_ticker": km.series_ticker,
+                        "title": km.question,
+                        "yes_bid_dollars": "0.92",
+                        "yes_ask_dollars": "0.92",
+                        "volume_24h": "1500",
+                        "open_interest": "400",
+                        "close_time": km.close_time,
+                        "status": "open",
+                    },
+                ],
             },
         ], "cursor": ""})
 
@@ -299,16 +313,23 @@ def test_make_kalshi_market_fetcher_returns_standalone_markets(monkeypatch):
 
 def test_make_kalshi_market_fetcher_returns_empty_when_no_qualifying(monkeypatch):
     def fake_get(url, params=None, timeout=None):
-        return _FakeResponse({"markets": [
+        return _FakeResponse({"events": [
             {
-                "ticker": "KXFOO-26-X",
-                "event_ticker": "KXFOO-26",
-                "title": "Expensive market",
-                "yes_bid_dollars": "0.10",
-                "yes_ask_dollars": "0.15",
-                "volume_24h": "100",
-                "open_interest": "50",
-                "close_time": "2026-09-01T00:00:00Z",
+                "ticker": "KXFOO-26",
+                "series_ticker": "KXFOO",
+                "category": "Politics",
+                "markets": [
+                    {
+                        "ticker": "KXFOO-26-X",
+                        "event_ticker": "KXFOO-26",
+                        "title": "Expensive market",
+                        "yes_bid_dollars": "0.10",
+                        "yes_ask_dollars": "0.15",
+                        "volume_24h": "100",
+                        "open_interest": "50",
+                        "close_time": "2026-09-01T00:00:00Z",
+                    },
+                ],
             },
         ], "cursor": ""})
 
